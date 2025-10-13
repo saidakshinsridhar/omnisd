@@ -1,0 +1,18 @@
+# Virtual Environment
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Large Data Files (we don't want to upload the dataset)
+data/
+
+# Trained Model (this file is too big for GitHub)
+backend/models/
+
+# Uploads folder
+backend/uploads/
+
+# macOS specific
+.DS_Store
