@@ -28,11 +28,18 @@ def init_db():
     ''')
     c.execute("INSERT OR IGNORE INTO users (id, username, points) VALUES (1, 'citizen_demo', 125)")
     # Workers table for smart dispatch
+    # Inside the init_db() function in backend/app.py
+
+    # Workers table with a new 'status' column
     c.execute('''
-        CREATE TABLE IF NOT EXISTS workers (name TEXT PRIMARY KEY, current_load INTEGER, specialty TEXT)
-    ''')
-    c.execute("INSERT OR IGNORE INTO workers VALUES ('Ravi Kumar', 0, 'Recyclables'), ('Priya Sharma', 0, 'General'), ('Anil Singh', 0, 'Recyclables'), ('Sunita Devi', 0, 'General')")
-    # Anomalies table for proactive alerts
+    CREATE TABLE IF NOT EXISTS workers (
+        name TEXT PRIMARY KEY, 
+        current_load INTEGER, 
+        specialty TEXT,
+        status TEXT 
+    )''')
+    # Add an initial status for each worker
+    c.execute("INSERT OR IGNORE INTO workers VALUES ('Ravi Kumar', 0, 'Recyclables', 'Idle'), ('Priya Sharma', 0, 'General', 'Idle'), ('Anil Singh', 0, 'Recyclables', 'Idle'), ('Sunita Devi', 0, 'General', 'Idle')")
     c.execute('''
         CREATE TABLE IF NOT EXISTS anomalies (
             id INTEGER PRIMARY KEY, timestamp TEXT, location TEXT, message TEXT, severity TEXT
@@ -90,7 +97,13 @@ train_all_forecast_models()
 
 # --- Mappings ---
 CATEGORY_MAP = {'cardboard': 'Cardboard', 'paper': 'Paper', 'plastic': 'Plastic', 'metal': 'Metal', 'glass': 'Glass', 'trash': 'General/Bio Waste'}
-
+WORKER_ASSIGNMENTS = {
+    'T. Nagar': 'Ravi Kumar', 'Adyar': 'Priya Sharma', 'Anna Nagar': 'Anil Singh',
+    'Velachery': 'Sunita Devi', 'Mylapore': 'Ravi Kumar', 'Nungambakkam': 'Priya Sharma',
+    'Guindy': 'Anil Singh', 'Besant Nagar': 'Sunita Devi', 'Thiruvanmiyur': 'Ravi Kumar',
+    'Royapettah': 'Priya Sharma', 'Egmore': 'Anil Singh', 'Vadapalani': 'Sunita Devi',
+    'Saidapet': 'Ravi Kumar', 'Chromepet': 'Priya Sharma', 'Pallavaram': 'Anil Singh'
+}
 # ==============================================================================
 #                               3. API ENDPOINTS
 # ==============================================================================
@@ -177,6 +190,70 @@ def get_alerts():
     conn = sqlite3.connect('waste_reports.db'); conn.row_factory = sqlite3.Row; c = conn.cursor()
     c.execute("SELECT * FROM anomalies ORDER BY id DESC"); alerts = [dict(row) for row in c.fetchall()]; conn.close()
     return jsonify(alerts)
+# Inside backend/app.py
+
+# --- INNOVATIVE FEATURE 1: Waste Composition Anomaly Detection ---
+@app.route('/anomalies/check', methods=['POST'])
+def check_for_anomalies():
+    data = request.json
+    location = data.get('location')
+    if not location:
+        return jsonify({'error': 'Location is required'}), 400
+
+    print(f"Running anomaly detection for {location}...")
+    conn = sqlite3.connect('waste_reports.db')
+    
+    # 1. Fetch all historical report data for this location
+    # We use pandas here for its powerful data manipulation capabilities
+    df = pd.read_sql_query(f"SELECT timestamp, waste_type FROM reports WHERE location = '{location}'", conn)
+    
+    if len(df) < 10: # Need at least 10 reports to get a baseline
+        conn.close()
+        return jsonify({'message': f'Not enough data to run anomaly detection for {location}.'}), 200
+
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    
+    # 2. Define our time windows: the historical baseline vs. the recent period
+    three_months_ago = pd.Timestamp.now() - pd.DateOffset(months=3)
+    last_7_days = pd.Timestamp.now() - pd.DateOffset(days=7)
+
+    baseline_df = df[df['timestamp'] < last_7_days]
+    recent_df = df[df['timestamp'] >= last_7_days]
+
+    if baseline_df.empty or recent_df.empty:
+        conn.close()
+        return jsonify({'message': 'Not enough recent or historical data to compare.'}), 200
+
+    # 3. Calculate the normal (baseline) vs. recent waste composition percentages
+    baseline_composition = baseline_df['waste_type'].value_counts(normalize=True)
+    recent_composition = recent_df['waste_type'].value_counts(normalize=True)
+
+    # 4. Find statistically significant deviations
+    anomalies_found = []
+    for waste_type, recent_perc in recent_composition.items():
+        baseline_perc = baseline_composition.get(waste_type, 0)
+        
+        # Anomaly definition: if the recent percentage is more than double the baseline
+        if recent_perc > (baseline_perc * 2) and recent_perc > 0.1: # and makes up at least 10% of recent waste
+            change = (recent_perc - baseline_perc) * 100
+            message = f"Anomaly Detected: Reports of '{waste_type}' in {location} have increased by {change:.0f}% recently, which is statistically unusual."
+            anomalies_found.append(message)
+            
+            # Save the anomaly to our database
+            c = conn.cursor()
+            alert_timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            c.execute("INSERT INTO anomalies (timestamp, location, message, severity) VALUES (?, ?, ?, ?)",
+                      (alert_timestamp, location, message, "Medium"))
+            conn.commit()
+
+    conn.close()
+
+    if anomalies_found:
+        print(f"🔎 Anomaly detected for {location}!")
+        return jsonify({'status': 'Anomalies Detected', 'details': anomalies_found})
+    else:
+        print(f"✅ No anomalies found for {location}.")
+        return jsonify({'status': 'No Anomalies Found'})
 
 # --- Endpoint 8: INNOVATIVE - Resource & Cost Simulation ---
 @app.route('/resource_plan', methods=['GET'])
@@ -201,6 +278,59 @@ def get_resource_plan():
         'estimated_worker_hours': int(estimated_worker_hours),
         'simulated_cost_inr': f"₹{simulated_cost:,.2f}"
     })
+# Inside backend/app.py
+
+# --- INNOVATIVE FEATURE 2: Predictive Failure & Dynamic Re-Routing ---
+@app.route('/simulate/failure', methods=['POST'])
+def simulate_failure():
+    data = request.json
+    failed_location = data.get('location')
+    if not failed_location:
+        return jsonify({'error': 'Location of the failure is required'}), 400
+
+    print(f"🚨 Simulating operational failure at {failed_location}...")
+    conn = sqlite3.connect('waste_reports.db')
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+
+    # 1. Identify the worker originally assigned to the failed location
+    # We use the WORKER_ASSIGNMENTS dict for simplicity
+    failed_worker = [worker for worker, loc in WORKER_ASSIGNMENTS.items() if loc == failed_location]
+
+    # 2. Find the best available backup worker
+    # The "best" is an IDLE worker from a DIFFERENT zone with the lowest current load
+    c.execute("""
+        SELECT name FROM workers 
+        WHERE status = 'Idle' AND name != ? 
+        ORDER BY current_load ASC 
+        LIMIT 1
+    """, (failed_worker[0] if failed_worker else '',))
+    
+    backup_worker_row = c.fetchone()
+
+    if not backup_worker_row:
+        conn.close()
+        return jsonify({'status': 'Crisis', 'message': 'No backup workers available! Manual intervention required.'}), 500
+
+    backup_worker_name = backup_worker_row['name']
+    
+    # 3. Create a high-priority task and assign the backup worker
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    waste_type = "High-Priority Unscheduled Pickup"
+    status = "Dispatched (Re-Routed)"
+    
+    c.execute("INSERT INTO reports (timestamp, location, waste_type, status, assigned_worker, user_id) VALUES (?, ?, ?, ?, ?, ?)",
+              (timestamp, failed_location, waste_type, status, backup_worker_name, 0)) # user_id 0 for system-generated tasks
+    
+    # 4. Update the backup worker's status to show they are now busy
+    c.execute("UPDATE workers SET status = 'On Job' WHERE name = ?", (backup_worker_name,))
+
+    conn.commit()
+    conn.close()
+    
+    response_message = f"Failure at {failed_location} simulated. System automatically re-routed the nearest available worker, {backup_worker_name}, to handle the capacity gap."
+    print(f"✅ {response_message}")
+    return jsonify({'status': 'Crisis Averted', 'message': response_message})
 
 # ==============================================================================
 #                                4. SERVER START
