@@ -2,55 +2,121 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sustainability Toolkit</title>
+    <title>Urban Waste Intelligence</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f9; margin: 0; padding: 20px; }
-        .header { text-align: center; margin-bottom: 40px; }
-        .header h1 { color: #2c3e50; }
-        .container { max-width: 600px; margin: auto; text-align: center; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px D(0,0,0,0.1); }
-        h2 { color: #333; }
-        input[type="file"] { margin: 20px 0; }
-        #result { margin-top: 20px; font-size: 1.2em; font-weight: bold; color: #007bff; min-height: 25px; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background-color: #f0f2f5; margin: 0; }
+        .header { background: #fff; padding: 10px 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { color: #333; font-size: 1.5em; }
+        .toggle-btn { background: #007bff; color: white; border: none; padding: 10px 15px; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        .main-container { display: grid; grid-template-columns: 380px 1fr; gap: 20px; padding: 20px; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        #map { height: 550px; border-radius: 8px; }
+        #result, #eco-tip { text-align: center; margin-top: 15px; }
+        #result { font-size: 1.2em; font-weight: bold; }
+        #eco-tip { color: #28a745; }
+        /* Hide admin view by default */
+        .admin-view { display: none; }
     </style>
 </head>
 <body>
-
     <div class="header">
-        <h1>♻️ Sustainability Hackathon Toolkit 📈</h1>
+        <h1>Urban Waste Intelligence</h1>
+        <button class="toggle-btn" onclick="toggleView()">Switch to Admin View</button>
     </div>
 
-    <div class="container" id="vision-engine">
-        <h2>Vision Engine: Waste Classifier</h2>
-        <p>Upload an image to classify it as cardboard, glass, metal, paper, plastic, or general trash.</p>
-        <input type="file" id="imageUpload" accept="image/*">
-        <h3 id="result"></h3>
+    <div class="main-container">
+        <div class="card citizen-view">
+            <h2>Citizen Eco-Assistant 🌿</h2>
+            <p>Upload a waste item to get recycling tips and earn points!</p>
+            <input type="file" id="imageUpload" accept="image/*" style="display: block; margin: 20px auto;">
+            <div id="result"></div>
+            <div id="eco-tip"></div>
+        </div>
+        <div class="card citizen-view" style="text-align: center;">
+             <h2>Your Impact</h2>
+             <p style="font-size: 2em; color: #28a745;">🌳 125 Points</p>
+             <p>You're helping build a greener city!</p>
+        </div>
+
+
+        <div class="card admin-view">
+            <h2>Admin Panel</h2>
+            <p>Predictive hotspots for waste collection.</p>
+            <button onclick="getHotspots()" class="toggle-btn" style="width: 100%;">Show Optimized Route for Tomorrow</button>
+        </div>
+        <div class="card admin-view" id="map-container">
+            <h2>Smart Collection Route Map</h2>
+            <div id="map"></div>
+        </div>
     </div>
-    
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        document.getElementById('imageUpload').addEventListener('change', async (event) => {
-            const file = event.target.files[0];
-            if (!file) return;
+        let currentView = 'citizen';
+        let map;
 
-            const resultElement = document.getElementById('result');
-            resultElement.textContent = 'Analyzing...';
-            const formData = new FormData();
-            formData.append('file', file);
-
-            try {
-                const response = await fetch('http://127.0.0.1:5001/predict', {
-                    method: 'POST',
-                    body: formData
-                });
-                if (!response.ok) throw new Error('API request failed');
-                const data = await response.json();
-                resultElement.textContent = `Prediction: ${data.prediction} (${data.confidence})`;
-            } catch (error) {
-                console.error('Error:', error);
-                resultElement.textContent = 'Error during prediction.';
+        // --- View Toggling ---
+        function toggleView() {
+            const citizenViews = document.querySelectorAll('.citizen-view');
+            const adminViews = document.querySelectorAll('.admin-view');
+            const btn = document.querySelector('.toggle-btn');
+            const mainContainer = document.querySelector('.main-container');
+            
+            if (currentView === 'citizen') {
+                citizenViews.forEach(el => el.style.display = 'none');
+                adminViews.forEach(el => el.style.display = 'block');
+                btn.textContent = 'Switch to Citizen View';
+                mainContainer.style.gridTemplateColumns = '380px 1fr';
+                currentView = 'admin';
+                if (!map) { initMap(); } 
+            } else {
+                citizenViews.forEach(el => el.style.display = 'block');
+                adminViews.forEach(el => el.style.display = 'none');
+                btn.textContent = 'Switch to Admin View';
+                mainContainer.style.gridTemplateColumns = '1fr 1fr';
+                currentView = 'citizen';
             }
-        });
-    </script>
+        }
 
+        // --- Citizen Eco-Assistant Logic (Placeholder) ---
+        document.getElementById('imageUpload').addEventListener('change', (event) => {
+            // We will add the real logic in the next step
+            document.getElementById('result').textContent = "Category: Recyclable ♻️";
+            document.getElementById('eco-tip').textContent = "Tip: Make sure to rinse containers before recycling!";
+        });
+
+        // --- Admin Map Logic ---
+        function initMap() {
+            map = L.map('map').setView([12.9716, 77.5946], 12); // Centered on Bengaluru
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenStreetMap contributors'
+            }).addTo(map);
+        }
+
+        async function getHotspots() {
+            const response = await fetch('http://127.0.0.1:5001/forecast');
+            const data = await response.json();
+            
+            map.eachLayer(layer => { 
+                if (layer instanceof L.Marker || layer instanceof L.Polyline) {
+                    map.removeLayer(layer);
+                }
+            });
+
+            const latLngs = [];
+            data.locations.forEach(loc => {
+                const marker = L.marker([loc.lat, loc.lng]).addTo(map)
+                    .bindPopup(`<b>${loc.name}</b><br>Predicted: ${loc.predicted_kg} kg`);
+                latLngs.push([loc.lat, loc.lng]);
+            });
+
+            const polyline = L.polyline(latLngs, {color: 'blue', weight: 5}).addTo(map);
+            map.fitBounds(polyline.getBounds().pad(0.1));
+        }
+
+        // Initial setup to hide admin view
+        document.querySelectorAll('.admin-view').forEach(el => el.style.display = 'none');
+    </script>
 </body>
 </html>
