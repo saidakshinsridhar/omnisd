@@ -57,7 +57,7 @@ def init_db():
 #                     2. APP & MODEL INITIALIZATION
 # ==============================================================================
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=["http://localhost:8080", "https://*.lovable.app"])
 init_db()
 
 # --- Load Vision Model ---
